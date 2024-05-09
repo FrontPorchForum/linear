@@ -321,11 +321,12 @@ export const importIssues = async (apiKey: string, importer: Importer): Promise<
 
     const formattedDueDate = issue.dueDate ? format(issue.dueDate, "yyyy-MM-dd") : undefined;
 
-    const createdIssue = await client.createIssue({
+    const created = await client.createIssue({
       teamId,
       projectId: projectId as unknown as string,
       title: issue.title,
       description,
+      estimate: issue.estimate,
       priority: issue.priority,
       labelIds,
       stateId,
@@ -334,8 +335,26 @@ export const importIssues = async (apiKey: string, importer: Importer): Promise<
       dueDate: formattedDueDate,
     });
 
+    const createdIssue = await created?.issue;
+
     if (issue.archived) {
-      await (await createdIssue.issue)?.archive();
+      await createdIssue?.archive();
+    }
+
+    if (!importAnswers.includeComments && issue.comments && createdIssue) {
+      issue.comments.forEach(comment => {
+        let body = comment.body;
+
+        if (comment.userId) {
+          body = `**Comment author**: ${comment.userId}\n\n${body}`;
+        }
+
+        client.createComment({
+          issueId: createdIssue.id,
+          body: body,
+          createdAt: comment.createdAt || new Date(),
+        });
+      });
     }
 
     issueCursor++;
@@ -356,11 +375,11 @@ const buildComments = async (
 ) => {
   const newComments: string[] = [];
   for (const comment of comments) {
-    const user = importData.users[comment.userId];
+    const user = importData.users[comment.userId]?.name || comment.userId;
     const date = comment.createdAt ? comment.createdAt.toISOString().split("T")[0] : undefined;
 
     const body = await replaceImagesInMarkdown(client, comment.body || "", importData.resourceURLSuffix);
-    newComments.push(`**${user.name}**${" " + date}\n\n${body}\n`);
+    newComments.push(`**${user}**${" " + date}\n\n${body}\n`);
   }
   return `${description}\n\n---\n\n${newComments.join("\n\n")}`;
 };
